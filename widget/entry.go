@@ -50,7 +50,9 @@ type Entry struct {
 	Password    bool
 	MultiLine   bool
 	Wrapping    fyne.TextWrap
-
+	WSize       fyne.Size
+	textSize    float32
+	CornerSize  float32
 	// Scroll can be used to turn off the scrolling of our entry when Wrapping is WrapNone.
 	//
 	// Since: 2.4
@@ -70,6 +72,7 @@ type Entry struct {
 
 	dirty       bool
 	focused     bool
+	IsFocued     bool
 	text        RichText
 	placeholder RichText
 	content     *entryContent
@@ -175,12 +178,12 @@ func (e *Entry) CreateRenderer() fyne.WidgetRenderer {
 	e.textProvider()
 	e.placeholderProvider()
 
-	box := canvas.NewRectangle(th.Color(theme.ColorNameInputBackground, v))
-	box.CornerRadius = th.Size(theme.SizeNameInputRadius)
+	box := canvas.NewRectangle(color.White)
+	box.CornerRadius = e.CornerSize
 	border := canvas.NewRectangle(color.Transparent)
 	border.StrokeWidth = th.Size(theme.SizeNameInputBorder)
 	border.StrokeColor = th.Color(theme.ColorNameInputBorder, v)
-	border.CornerRadius = th.Size(theme.SizeNameInputRadius)
+	border.CornerRadius = e.CornerSize
 	cursor := canvas.NewRectangle(color.Transparent)
 	cursor.Hide()
 
@@ -319,6 +322,7 @@ func (e *Entry) FocusGained() {
 	e.setFieldsAndRefresh(func() {
 		e.dirty = true
 		e.focused = true
+		e.IsFocued = true
 	})
 	if e.onFocusChanged != nil {
 		e.onFocusChanged(true)
@@ -332,6 +336,7 @@ func (e *Entry) FocusLost() {
 	e.setFieldsAndRefresh(func() {
 		e.focused = false
 		e.selectKeyDown = false
+		e.IsFocued = false
 	})
 	if e.onFocusChanged != nil {
 		e.onFocusChanged(false)
@@ -403,7 +408,7 @@ func (e *Entry) KeyUp(key *fyne.KeyEvent) {
 // Implements: fyne.Widget
 func (e *Entry) MinSize() fyne.Size {
 	e.propertyLock.RLock()
-	cached := e.minCache
+	cached := e.WSize
 	e.propertyLock.RUnlock()
 	if !cached.IsZero() {
 		return cached
@@ -413,7 +418,7 @@ func (e *Entry) MinSize() fyne.Size {
 	min := e.BaseWidget.MinSize()
 
 	e.propertyLock.Lock()
-	e.minCache = min
+	e.minCache = e.WSize
 	e.propertyLock.Unlock()
 	return min
 }
@@ -1684,13 +1689,32 @@ func (r *entryRenderer) trailingInset() float32 {
 	return xInset
 }
 
+func (e *Entry) SizeText(size float32) {
+	e.propertyLock.Lock()
+	e.textSize = size
+	e.propertyLock.Unlock()
+	e.Refresh()
+}
+func (e *Entry) SetCornerSize(size float32) {
+	e.propertyLock.Lock()
+	e.CornerSize = size
+	e.propertyLock.Unlock()
+	e.Refresh()
+}
+func (e *Entry) SetWSize(size fyne.Size) {
+	e.propertyLock.Lock()
+	e.WSize = size
+	e.propertyLock.Unlock()
+	e.Refresh()
+}
+
 func (r *entryRenderer) Layout(size fyne.Size) {
 	th := r.entry.Theme()
 	borderSize := th.Size(theme.SizeNameInputBorder)
 	iconSize := th.Size(theme.SizeNameInlineIcon)
-	innerPad := th.Size(theme.SizeNameInnerPadding)
+	//innerPad := th.Size(theme.SizeNameInnerPadding)
 	inputBorder := th.Size(theme.SizeNameInputBorder)
-	lineSpace := th.Size(theme.SizeNameLineSpacing)
+	//lineSpace := th.Size(theme.SizeNameLineSpacing)
 
 	// 0.5 is removed so on low DPI it rounds down on the trailing edge
 	r.border.Resize(fyne.NewSize(size.Width-borderSize-.5, size.Height-borderSize-.5))
@@ -1704,7 +1728,7 @@ func (r *entryRenderer) Layout(size fyne.Size) {
 		actionIconSize = fyne.NewSquareSize(iconSize)
 
 		r.entry.ActionItem.Resize(actionIconSize)
-		r.entry.ActionItem.Move(fyne.NewPos(size.Width-actionIconSize.Width-innerPad, innerPad))
+		r.entry.ActionItem.Move(fyne.NewPos(size.Width-30, size.Height/2-actionIconSize.Height/2))
 	}
 
 	validatorIconSize := fyne.NewSize(0, 0)
@@ -1715,16 +1739,19 @@ func (r *entryRenderer) Layout(size fyne.Size) {
 		r.entry.validationStatus.Resize(validatorIconSize)
 
 		if r.entry.ActionItem == nil {
-			r.entry.validationStatus.Move(fyne.NewPos(size.Width-validatorIconSize.Width-innerPad, innerPad))
+			r.entry.validationStatus.Move(fyne.NewPos(size.Width-30, size.Height/2-validatorIconSize.Height/2))
 		} else {
-			r.entry.validationStatus.Move(fyne.NewPos(size.Width-validatorIconSize.Width-actionIconSize.Width-innerPad-lineSpace, innerPad))
+			r.entry.validationStatus.Move(fyne.NewPos(size.Width-30-actionIconSize.Width, size.Height/2-validatorIconSize.Height/2))
 		}
 	}
-
+	// Заменить магическую 10 на переменную сдвига текста от края
 	r.entry.textProvider().inset = fyne.NewSize(0, inputBorder)
 	r.entry.placeholderProvider().inset = fyne.NewSize(0, inputBorder)
-	entrySize := size.Subtract(fyne.NewSize(r.trailingInset(), inputBorder*2))
-	entryPos := fyne.NewPos(0, inputBorder)
+	entrySize := size.Subtract(fyne.NewSize(r.trailingInset() + 10, inputBorder*2))
+
+	textHeight := r.entry.textProvider().MinSize().Height
+	offsetY := (size.Height - textHeight) / 2
+	entryPos := fyne.NewPos(10, offsetY)
 
 	r.entry.propertyLock.Lock()
 	textPos := r.entry.textPosFromRowCol(r.entry.CursorRow, r.entry.CursorColumn)
@@ -1849,9 +1876,9 @@ func (r *entryRenderer) Refresh() {
 	}
 	r.entry.updateCursorAndSelection()
 
-	r.box.FillColor = th.Color(theme.ColorNameInputBackground, v)
-	r.box.CornerRadius = th.Size(theme.SizeNameInputRadius)
-	r.border.CornerRadius = r.box.CornerRadius
+	r.box.FillColor = color.White
+	r.box.CornerRadius = r.entry.CornerSize
+	r.border.CornerRadius = r.entry.CornerSize
 	if focusedAppearance {
 		r.border.StrokeColor = th.Color(theme.ColorNamePrimary, v)
 	} else {
